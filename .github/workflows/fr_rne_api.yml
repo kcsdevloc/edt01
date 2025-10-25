@@ -31,39 +31,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Login (creates token file)
+      # We will LOGIN PER SIREN to keep the token fresh.
+      - name: Process SIRENs with re-login and retries
+        shell: bash
         run: |
+          set -e
           mkdir -p out/FR
-          # fr_rne_fetch.py will read INPI_USER / INPI_PASS from env
-          python countries/fr_rne_fetch.py --action login --token-file out/FR/inpi_token.json
-
-      - name: List attachments (stage + breathing room)
-        run: |
-          IFS=',' read -ra S <<< "${{ inputs.sirens }}"
-          for s in "${S[@]}"; do
-            s="$(echo "$s" | xargs)"  # trim
-            echo "Listing $s ..."
-            python countries/fr_rne_fetch.py --action list-attachments --siren "$s" --token-file out/FR/inpi_token.json --out out/FR || true
-            # Give INPI some breathing room before we hit the ZIP endpoint
-            sleep 30
-          done
-
-      - name: Download attachments with retries (per SIREN)
-        run: |
           IFS=',' read -ra S <<< "${{ inputs.sirens }}"
           ok=0
           for s in "${S[@]}"; do
             s="$(echo "$s" | xargs)"
-            echo "Downloading $s ..."
-            for i in 1 2 3 4 5; do
+            echo "=== SIREN $s ==="
+
+            # Fresh login before each SIREN
+            python countries/fr_rne_fetch.py --action login --token-file out/FR/inpi_token.json
+
+            # List (soft probe)
+            python countries/fr_rne_fetch.py --action list-attachments --siren "$s" --token-file out/FR/inpi_token.json --out out/FR || true
+            sleep 10
+
+            # Download with up to 6 retries; re-login before every retry
+            for i in 1 2 3 4 5 6; do
               if python countries/fr_rne_fetch.py --action download-attachments --siren "$s" --token-file out/FR/inpi_token.json --out out/FR; then
                 ok=$((ok+1))
                 break
               fi
               echo "retry $i for $s ..."
-              sleep $((60*i))
+              # re-login to refresh token before next attempt
+              python countries/fr_rne_fetch.py --action login --token-file out/FR/inpi_token.json || true
+              # backoff (grows): 20s, 40s, 60s, 90s, 120s, 180s
+              case $i in
+                1) sleep 20;;
+                2) sleep 40;;
+                3) sleep 60;;
+                4) sleep 90;;
+                5) sleep 120;;
+                6) sleep 180;;
+              esac
             done
           done
+
           if [ "$ok" -eq 0 ]; then
             echo "All downloads failed"
             exit 1
