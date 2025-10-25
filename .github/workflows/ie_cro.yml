@@ -2,10 +2,15 @@ name: ie-cro
 on:
   workflow_dispatch:
     inputs:
-      year:
-        description: "Year (2022 or 2023)"
+      years:
+        description: "Comma list of years (e.g. 2023,2022)"
         required: true
-        default: "2023"
+        default: "2023,2022"
+      soft_minutes:
+        description: "Soft time budget (<=300)"
+        required: true
+        default: "290"
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -15,13 +20,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Run fetch
+
+      - name: Run fetch (multi-year, soft budget)
+        shell: bash
         run: |
+          set -e
           mkdir -p out/IE
-          python countries/ie_cro_fetch.py --action fetch --year "${{ inputs.year }}" --out out/IE
+          IFS=',' read -ra Y <<< "${{ inputs.years }}"
+          soft=$(( ${{ inputs.soft_minutes }} * 60 ))
+          start=$(date +%s)
+          for y in "${Y[@]}"; do
+            now=$(date +%s); elapsed=$((now-start))
+            if [ "$elapsed" -ge "$soft" ]; then echo "Soft time budget hit ($elapsed s)"; break; fi
+            y="$(echo "$y" | xargs)"
+            echo "YEAR $y"
+            python countries/ie_cro_fetch.py --action fetch --year "$y" --out out/IE || true
+          done
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ie-${{ inputs.year }}
+          name: ie-${{ inputs.years }}
           path: out/IE/**
           retention-days: 7
