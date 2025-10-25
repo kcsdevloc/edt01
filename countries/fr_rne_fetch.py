@@ -8,9 +8,24 @@ ATT_ZIP  = "https://registre-national-entreprises.inpi.fr/api/companies/{siren}/
 
 def ensure_dir(p): os.makedirs(p, exist_ok=True)
 def http_req(url, data=None, headers=None, timeout=180):
-    req = urllib.request.Request(url, data=data, headers=headers or {"User-Agent":"Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    import urllib.error, time
+    hdrs = headers or {"User-Agent":"Mozilla/5.0"}
+    backoff = 2.0
+    for attempt in range(8):  # ~2+4+8+16+32+64+128 = bounded
+        try:
+            req = urllib.request.Request(url, data=data, headers=hdrs)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            # 429 or 5xx -> backoff and retry
+            if e.code == 429 or (500 <= e.code < 600):
+                time.sleep(backoff)
+                backoff = min(backoff * 2.0, 180.0)
+                continue
+            # anything else -> rethrow
+            raise
+    raise SystemExit("HTTP retries exhausted")
+
 
 def main():
     ap = argparse.ArgumentParser(description="France INPI RNE fetcher")
