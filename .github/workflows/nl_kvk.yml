@@ -1,0 +1,39 @@
+name: nl-kvk
+on:
+  workflow_dispatch:
+    inputs:
+      parts:
+        description: "Comma list of parts to fetch (e.g. 0,1,2)"
+        required: true
+        default: "0"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download parts
+        run: |
+          mkdir -p out/NL/bulk
+          IFS=',' read -ra P <<< "${{ inputs.parts }}"
+          for i in "${P[@]}"; do
+            url="https://www.kvk.nl/download/kvk-open-data-set-jaarrekeningen${i}.zip"
+            echo "GET $url"
+            curl -L "$url" -o "out/NL/bulk/kvk_jaarrekeningen_part${i}.zip"
+          done
+      - name: Bundle zips and sample xml tar
+        run: |
+          python countries/nl_kvk_pack_and_parse.py --action bundle-zips --folder out/NL/bulk --out out/NL/bulk/nl_kvk_zip_parts.tar.gz
+          # XML tar from first part if present
+          if [ -f out/NL/bulk/kvk_jaarrekeningen_part0.zip ]; then
+            python countries/nl_kvk_pack_and_parse.py --action pack-xml --zip out/NL/bulk/kvk_jaarrekeningen_part0.zip --out out/NL/bulk/nl_part0_xmls.tar.gz
+          fi
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: nl-kvk
+          path: out/NL/**
+          retention-days: 7
