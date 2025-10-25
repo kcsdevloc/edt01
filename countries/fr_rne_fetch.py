@@ -8,23 +8,32 @@ ATT_ZIP  = "https://registre-national-entreprises.inpi.fr/api/companies/{siren}/
 
 def ensure_dir(p): os.makedirs(p, exist_ok=True)
 def http_req(url, data=None, headers=None, timeout=180):
-    import urllib.error, time
-    hdrs = headers or {"User-Agent":"Mozilla/5.0"}
+    import urllib.error, time, random
+    hdrs = {"User-Agent":"Mozilla/5.0","Connection":"close"}
+    if headers: hdrs.update(headers)
     backoff = 2.0
-    for attempt in range(8):  # ~2+4+8+16+32+64+128 = bounded
+    for attempt in range(10):
         try:
             req = urllib.request.Request(url, data=data, headers=hdrs)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
-            # 429 or 5xx -> backoff and retry
+            # 429/5xx -> sleep (use Retry-After if present)
             if e.code == 429 or (500 <= e.code < 600):
-                time.sleep(backoff)
-                backoff = min(backoff * 2.0, 180.0)
+                ra = e.headers.get("Retry-After")
+                if ra:
+                    try:
+                        wait = float(ra)
+                    except Exception:
+                        wait = backoff
+                else:
+                    wait = backoff
+                time.sleep(wait + random.uniform(0.5, 1.5))
+                backoff = min(backoff * 2.0, 240.0)
                 continue
-            # anything else -> rethrow
             raise
     raise SystemExit("HTTP retries exhausted")
+
 
 
 def main():
