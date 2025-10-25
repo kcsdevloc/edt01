@@ -1,0 +1,32 @@
+name: fi-prh
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "financialDate (YYYY-MM-DD)"
+        required: true
+        default: "2023-12-31"
+      limit:
+        description: "First N XBRLs"
+        required: true
+        default: "200"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run list and download
+        run: |
+          mkdir -p out/FI
+          python countries/fi_prh_fetch.py --action list --financial-date "${{ inputs.date }}" --out out/FI
+          python countries/fi_prh_fetch.py --action download --financial-date "${{ inputs.date }}" --limit ${{ inputs.limit }} --out out/FI
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: fi-${{ inputs.date }}
+          path: out/FI/**
+          retention-days: 7
